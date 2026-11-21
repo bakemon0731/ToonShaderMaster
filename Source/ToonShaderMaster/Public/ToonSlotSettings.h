@@ -101,4 +101,15 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "FaceShadow", meta = (UIMin = "0.0", UIMax = "1.0"))
 	float FaceShadowSmoothness = 0.0f;
+
+	/**
+	 * FaceSDFのUVオフセット。影の形は変えず、位置だけ動かす。
+	 * M_ToonFaceShader の同名スカラーパラメータに反映される(FaceSDFのUVs = TexCoord + (U, V))。
+	 * UEはVが下向きなので、Vをプラスにすると影が上へ動く。マスター側のデフォルト値も揃えること。
+	 */
+	UPROPERTY(EditAnywhere, Category = "FaceShadow", meta = (UIMin = "-0.5", UIMax = "0.5"))
+	float FaceShadowOffsetU = 0.0f;
+
+	UPROPERTY(EditAnywhere, Category = "FaceShadow", meta = (UIMin = "-0.5", UIMax = "0.5"))
+	float FaceShadowOffsetV = 0.05f;
 };

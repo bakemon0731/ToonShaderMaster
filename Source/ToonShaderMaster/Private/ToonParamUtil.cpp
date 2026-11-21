@@ -80,6 +80,14 @@ void ToonParamUtil::ApplyToMI(UObject* Settings, UMaterialInstanceConstant* MI, 
 		{
 			if (UTexture* Tex = Cast<UTexture>(O->GetObjectPropertyValue_InContainer(Settings)))
 			{
+				// 親マスターと同じテクスチャなら書かない(マスター側の差し替えに追従させる)
+				UTexture* ParentTex = nullptr;
+				if (!bWriteAll && MI->Parent
+					&& MI->Parent->GetTextureParameterValue(FHashedMaterialParameterInfo(P->GetFName()), ParentTex)
+					&& ParentTex == Tex)
+				{
+					continue;
+				}
 				MI->SetTextureParameterValueEditorOnly(Info, Tex);
 			}
 		}

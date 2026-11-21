@@ -197,7 +197,13 @@ void SToonConverterWidget::BuildEntries()
 			E->MasterSettings = NewObject<UToonMasterSettings>(GetTransientPackage());
 			E->FaceSettings = NewObject<UToonFaceSettings>(GetTransientPackage());
 
-			// 元マテリアルのテクスチャを初期値にする
+			// 顔マスターに設定済みの値(FaceSDFのハード参照テクスチャなど)を初期値にする
+			if (FaceMat)
+			{
+				ToonParamUtil::LoadFromMaterial(E->FaceSettings, FaceMat);
+			}
+
+			// 元マテリアルのテクスチャを初期値にする(BaseColorはマスターの値より優先)
 			if (UTexture2D* Src = Cast<UTexture2D>(FToonConverter::FindSourceTexture(Orig)))
 			{
 				E->MasterSettings->BaseColor = Src;
