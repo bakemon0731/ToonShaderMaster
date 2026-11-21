@@ -1,36 +1,74 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/GCObject.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 #include "AssetRegistry/AssetData.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ToonSlotSettings.h"
 
 class USkeletalMesh;
+class IDetailsView;
+class SToonPreviewViewport;
+struct FPropertyChangedEvent;
 
-struct FToonSlotRow
+/** マテリアルスロット1つ分の編集状態 */
+struct FToonSlotEntry
 {
 	int32 Index = 0;
 	FName SlotName;
 	FString MaterialName;
 	bool bFace = false;
+
+	// 顔/顔以外のどちらに切り替えても値を失わないよう、両方持つ
+	TObjectPtr<UToonMasterSettings> MasterSettings = nullptr;
+	TObjectPtr<UToonFaceSettings> FaceSettings = nullptr;
+
+	/** 3Dプレビュー用のマテリアル */
+	TObjectPtr<UMaterialInstanceDynamic> PreviewMID = nullptr;
+
+	UObject* GetActiveSettings() const
+	{
+		return bFace ? static_cast<UObject*>(FaceSettings.Get()) : static_cast<UObject*>(MasterSettings.Get());
+	}
 };
 
-class SToonConverterWidget : public SCompoundWidget
+class SToonConverterWidget : public SCompoundWidget, public FGCObject
 {
 public:
 	SLATE_BEGIN_ARGS(SToonConverterWidget) {}
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SToonConverterWidget();
+
+	// FGCObject
+	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
+	virtual FString GetReferencerName() const override { return TEXT("SToonConverterWidget"); }
 
 private:
 	FString GetMeshPath() const;
 	void OnMeshChanged(const FAssetData& AssetData);
-	void RebuildRows();
-	TSharedRef<ITableRow> OnGenerateRow(TSharedPtr<FToonSlotRow> Item, const TSharedRef<STableViewBase>& OwnerTable);
+	void BuildEntries();
+
+	TSharedRef<ITableRow> OnGenerateRow(TSharedPtr<FToonSlotEntry> Item, const TSharedRef<STableViewBase>& OwnerTable);
+	void OnSlotSelected(TSharedPtr<FToonSlotEntry> Item, ESelectInfo::Type SelectInfo);
+
+	void SetFace(TSharedPtr<FToonSlotEntry> Entry, bool bFace);
+	void RebuildPreviewMID(FToonSlotEntry& Entry);
+	void OnObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
+
 	FReply OnConvertClicked();
 
 	TWeakObjectPtr<USkeletalMesh> Mesh;
-	TArray<TSharedPtr<FToonSlotRow>> Rows;
-	TSharedPtr<SListView<TSharedPtr<FToonSlotRow>>> ListView;
+	TArray<TSharedPtr<FToonSlotEntry>> Entries;
+	TSharedPtr<FToonSlotEntry> SelectedEntry;
+
+	TSharedPtr<SListView<TSharedPtr<FToonSlotEntry>>> ListView;
+	TSharedPtr<IDetailsView> DetailsView;
+	TSharedPtr<SToonPreviewViewport> Viewport;
+
+	float LightPitch = -35.f;
+	float LightYaw = 150.f;
 };

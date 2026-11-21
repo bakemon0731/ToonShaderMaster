@@ -19,6 +19,7 @@ public class ToonShaderMaster : ModuleRules
 			"SlateCore",
 			"InputCore",
 			"UnrealEd",
+			"EditorFramework",
 			"AssetTools",
 			"AssetRegistry",
 			"PropertyEditor",

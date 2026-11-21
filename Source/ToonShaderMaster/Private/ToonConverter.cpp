@@ -10,6 +10,7 @@
 #include "Misc/PackageName.h"
 #include "ObjectTools.h"
 #include "ScopedTransaction.h"
+#include "ToonParamUtil.h"
 
 namespace
 {
@@ -19,35 +20,39 @@ namespace
 
 	// 両マスター共通のテクスチャパラメータ名
 	const FName BaseColorParam(TEXT("BaseColor"));
-
-	/** 元マテリアルからBaseColor用のテクスチャを探す(WhiteSquareTexture等) */
-	UTexture* FindSourceTexture(UMaterialInterface* Orig)
-	{
-		if (!Orig)
-		{
-			return nullptr;
-		}
-
-		UTexture* Tex = nullptr;
-		if (Orig->GetTextureParameterValue(FHashedMaterialParameterInfo(BaseColorParam), Tex) && Tex)
-		{
-			return Tex;
-		}
-
-		TArray<UTexture*> Used;
-		Orig->GetUsedTextures(Used, EMaterialQualityLevel::Num, true, ERHIFeatureLevel::Num, true);
-		for (UTexture* T : Used)
-		{
-			if (T)
-			{
-				return T;
-			}
-		}
-		return nullptr;
-	}
 }
 
-bool FToonConverter::Convert(USkeletalMesh* Mesh, const TSet<int32>& FaceSlots, FToonConvertResult& OutResult)
+UMaterialInterface* FToonConverter::GetMaster(bool bFace)
+{
+	return Cast<UMaterialInterface>(FSoftObjectPath(bFace ? FaceMasterPath : MasterPath).TryLoad());
+}
+
+UTexture* FToonConverter::FindSourceTexture(UMaterialInterface* Orig)
+{
+	if (!Orig)
+	{
+		return nullptr;
+	}
+
+	UTexture* Tex = nullptr;
+	if (Orig->GetTextureParameterValue(FHashedMaterialParameterInfo(BaseColorParam), Tex) && Tex)
+	{
+		return Tex;
+	}
+
+	TArray<UTexture*> Used;
+	Orig->GetUsedTextures(Used, EMaterialQualityLevel::Num, true, ERHIFeatureLevel::Num, true);
+	for (UTexture* T : Used)
+	{
+		if (T)
+		{
+			return T;
+		}
+	}
+	return nullptr;
+}
+
+bool FToonConverter::Convert(USkeletalMesh* Mesh, const TArray<FToonConvertSlotInput>& Slots, FToonConvertResult& OutResult)
 {
 	if (!Mesh)
 	{
@@ -55,8 +60,8 @@ bool FToonConverter::Convert(USkeletalMesh* Mesh, const TSet<int32>& FaceSlots, 
 		return false;
 	}
 
-	UMaterialInterface* Master = Cast<UMaterialInterface>(FSoftObjectPath(MasterPath).TryLoad());
-	UMaterialInterface* FaceMaster = Cast<UMaterialInterface>(FSoftObjectPath(FaceMasterPath).TryLoad());
+	UMaterialInterface* Master = GetMaster(false);
+	UMaterialInterface* FaceMaster = GetMaster(true);
 	if (!Master)
 	{
 		OutResult.Errors.Add(FString::Printf(TEXT("マスターが見つかりません: %s"), MasterPath));
@@ -83,14 +88,16 @@ bool FToonConverter::Convert(USkeletalMesh* Mesh, const TSet<int32>& FaceSlots, 
 	{
 		UMaterialInterface* Orig = Mesh->GetMaterials()[i].MaterialInterface;
 		const FName SlotName = Mesh->GetMaterials()[i].MaterialSlotName;
-		const bool bFace = FaceSlots.Contains(i);
-		UMaterialInterface* Parent = bFace ? FaceMaster : Master;
+
+		const FToonConvertSlotInput Input = Slots.IsValidIndex(i) ? Slots[i] : FToonConvertSlotInput();
+		UMaterialInterface* Parent = Input.bFace ? FaceMaster : Master;
 
 		const FString AssetName = ObjectTools::SanitizeObjectName(
 			FString::Printf(TEXT("MI_%s_%s"), *Mesh->GetName(), *SlotName.ToString()));
 		const FString PackageName = Dir / AssetName;
 
 		UMaterialInstanceConstant* MI = nullptr;
+		bool bReused = false;
 
 		// 既存MIがあれば再利用して親だけ付け替える
 		if (FPackageName::DoesPackageExist(PackageName))
@@ -100,6 +107,7 @@ bool FToonConverter::Convert(USkeletalMesh* Mesh, const TSet<int32>& FaceSlots, 
 			{
 				MI->Modify();
 				MI->SetParentEditorOnly(Parent);
+				bReused = true;
 				++OutResult.Reused;
 			}
 		}
@@ -122,8 +130,12 @@ bool FToonConverter::Convert(USkeletalMesh* Mesh, const TSet<int32>& FaceSlots, 
 			continue;
 		}
 
-		// BaseColorテクスチャだけ上書き。その他のパラメータはマスターのデフォルトを継承する
-		if (UTexture* Tex = FindSourceTexture(Orig))
+		if (Input.Settings)
+		{
+			// UIで調整した値を反映。新規MIはデフォルトと違う値だけ書いて親を継承、再利用MIは全て上書き
+			ToonParamUtil::ApplyToMI(Input.Settings, MI, bReused);
+		}
+		else if (UTexture* Tex = FindSourceTexture(Orig))
 		{
 			MI->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(BaseColorParam), Tex);
 		}
