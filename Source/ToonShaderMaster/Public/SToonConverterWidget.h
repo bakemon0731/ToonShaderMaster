@@ -92,6 +92,7 @@ private:
 	bool bCreateBlueprint = true;
 	TSharedPtr<SToonPreviewViewport> Viewport;
 
+	float CameraSpeed = 1.f;
 	float LightPitch = -35.f;
 	float LightYaw = 150.f;
 };

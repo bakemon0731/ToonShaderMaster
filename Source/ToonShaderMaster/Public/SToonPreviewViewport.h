@@ -31,6 +31,9 @@ public:
 	/** ライト(ディレクショナル)の向き */
 	void SetLightRotation(float Pitch, float Yaw);
 
+	/** カメラ操作(回転・パン・ズーム)の速さ。1.0が標準 */
+	void SetCameraSpeed(float Speed);
+
 	/** メッシュ全体が収まる位置へカメラを戻す */
 	void FrameMesh();
 

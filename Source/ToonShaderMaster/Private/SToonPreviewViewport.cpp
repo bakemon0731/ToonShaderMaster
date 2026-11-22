@@ -19,7 +19,8 @@ public:
 		DrawHelper.bDrawGrid = false;
 		DrawHelper.bDrawPivot = false;
 		bSetListenerPosition = false;
-		bUsingOrbitCamera = true;
+		bUsingOrbitCamera = false; // FPS / フライカメラ操作向け
+		SetCustomCameraSpeed(1.f);
 	}
 
 	virtual void Tick(float DeltaSeconds) override
@@ -32,11 +33,51 @@ public:
 		}
 	}
 
+	/** カメラ速度(1.0が標準) */
+	void SetCustomCameraSpeed(float Speed)
+	{
+		CustomCameraSpeed = FMath::Clamp(Speed, 0.1f, 10.f);
+		CameraSpeedScalar = CustomCameraSpeed;
+	}
+
+	float GetCustomCameraSpeed() const
+	{
+		return CustomCameraSpeed;
+	}
+
+	virtual bool InputKey(const FInputKeyEventArgs& EventArgs) override
+	{
+		const bool bIsScrollUp = (EventArgs.Key == EKeys::MouseScrollUp);
+		const bool bIsScrollDown = (EventArgs.Key == EKeys::MouseScrollDown);
+
+		if (EventArgs.Event == IE_Pressed && (bIsScrollUp || bIsScrollDown))
+		{
+			FViewport* ActiveViewport = EventArgs.Viewport;
+			const bool bHoldingMouseButton = ActiveViewport &&
+				(ActiveViewport->KeyState(EKeys::LeftMouseButton) || ActiveViewport->KeyState(EKeys::RightMouseButton));
+
+			// 左または右ボタンを押しながらのホイールでカメラ速度をオンザフライ変更
+			if (bHoldingMouseButton)
+			{
+				const float Step = bIsScrollUp ? 0.25f : -0.25f;
+				SetCustomCameraSpeed(CustomCameraSpeed + Step);
+				Invalidate();
+				return true;
+			}
+		}
+
+		return FEditorViewportClient::InputKey(EventArgs);
+	}
+
 	virtual FLinearColor GetBackgroundColor() const override
 	{
 		return FLinearColor(0.12f, 0.12f, 0.14f);
 	}
+
+private:
+	float CustomCameraSpeed = 1.f;
 };
+
 
 void SToonPreviewViewport::Construct(const FArguments& InArgs)
 {
@@ -114,6 +155,14 @@ void SToonPreviewViewport::SetOutlineSlotMaterial(int32 SlotIndex, UMaterialInte
 	if (OutlineComp)
 	{
 		OutlineComp->SetMaterial(SlotIndex, Material);
+	}
+}
+
+void SToonPreviewViewport::SetCameraSpeed(float Speed)
+{
+	if (ViewportClient.IsValid())
+	{
+		ViewportClient->SetCustomCameraSpeed(Speed);
 	}
 }
 

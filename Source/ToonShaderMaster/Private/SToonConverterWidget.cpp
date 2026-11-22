@@ -146,6 +146,28 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 					})
 				]
 			]
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 4, 8, 0)
+			[
+				MakeHeading(TEXT("カメラの速さ"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 2, 8, 0)
+			[
+				MakeHint(TEXT("回転・パン・ズーム(ホイール含む)の速さです。1.0が標準。"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 4, 8, 8)
+			[
+				SNew(SSpinBox<float>)
+				.MinValue(0.1f).MaxValue(5.f)
+				.MinSliderValue(0.1f).MaxSliderValue(5.f)
+				.Delta(0.1f)
+				.Value_Lambda([this]() { return CameraSpeed; })
+				.OnValueChanged_Lambda([this](float V)
+				{
+					CameraSpeed = V;
+					Viewport->SetCameraSpeed(CameraSpeed);
+				})
+			]
 		]
 
 		// ===== 中: 手順 1〜4 =====
