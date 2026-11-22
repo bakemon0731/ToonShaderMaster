@@ -45,6 +45,15 @@ public:
 	/** 元マテリアルからBaseColor用のテクスチャを探す(WhiteSquareTexture等) */
 	static UTexture* FindSourceTexture(UMaterialInterface* Orig);
 
+	/** 変換前のマテリアルの記録(Saved/ToonShaderMaster/Backup)があるか */
+	static bool HasBackup(USkeletalMesh* Mesh);
+
+	/**
+	 * 変換前のマテリアルへスロットを戻す。戻したスロット数を返す。記録が無ければ0。
+	 * 記録はスロット名で引くので、スロットの順序が変わっていても戻せる。
+	 */
+	static int32 RestoreOriginalMaterials(USkeletalMesh* Mesh, TArray<FString>& OutErrors);
+
 	/** アウトライン用マスター(M_ToonOutline)をロードして返す */
 	static UMaterialInterface* GetOutlineMaster();
 

@@ -145,20 +145,3 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Mask")
 	FLinearColor MaskChannel = FLinearColor(1.f, 0.f, 0.f, 0.f);
 };
-
-/** 全スロットへ一括で反映する値。変更すると全スロットの同名の値が上書きされる(その後スロットごとに調整も可能) */
-UCLASS(Transient)
-class UToonGlobalSettings : public UObject
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(EditAnywhere, Category = "Global")
-	FLinearColor ShadowColor = FLinearColor(1.f, 0.7f, 1.f, 1.f);
-
-	UPROPERTY(EditAnywhere, Category = "Global")
-	FLinearColor ShadowOuterColor = FLinearColor(1.f, 0.5f, 1.f, 1.f);
-
-	UPROPERTY(EditAnywhere, Category = "Global", meta = (UIMin = "0.0", UIMax = "1.0"))
-	float OutlineThickness = 0.1f;
-};

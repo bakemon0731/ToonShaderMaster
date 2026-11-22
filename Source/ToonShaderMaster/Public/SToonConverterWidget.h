@@ -66,10 +66,12 @@ private:
 	void RebuildPreviewMID(FToonSlotEntry& Entry);
 	void RebuildOutlinePreviewMID(FToonSlotEntry& Entry);
 	void SyncGlobalFromEntries();
-	void ApplyGlobalChange(FName PropertyName);
+	void ApplyGlobalChange(UObject* GlobalObject, FName PropertyName);
+	void RefreshAll();
 	void OnObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
 
 	FReply OnConvertClicked();
+	FReply OnRestoreClicked();
 
 	TWeakObjectPtr<USkeletalMesh> Mesh;
 	TArray<TSharedPtr<FToonSlotEntry>> Entries;
@@ -78,9 +80,15 @@ private:
 	TSharedPtr<SListView<TSharedPtr<FToonSlotEntry>>> ListView;
 	TSharedPtr<IDetailsView> DetailsView;
 	TSharedPtr<IDetailsView> OutlineDetailsView;
-	TSharedPtr<IDetailsView> GlobalDetailsView;
+	TSharedPtr<IDetailsView> GlobalMasterDetailsView;
+	TSharedPtr<IDetailsView> GlobalOutlineDetailsView;
 	TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
-	TObjectPtr<UToonGlobalSettings> GlobalSettings = nullptr;
+
+	/** 全体設定。MM_ToonShader / M_ToonOutline の全パラメータ(BaseColorテクスチャを除く)。変更は全スロットへ一括反映 */
+	TObjectPtr<UToonMasterSettings> GlobalMaster = nullptr;
+	TObjectPtr<UToonOutlineSettings> GlobalOutline = nullptr;
+	/** 全体設定の表示タブ(0=MM_ToonShader, 1=M_ToonOutline) */
+	int32 GlobalTab = 0;
 	bool bCreateBlueprint = true;
 	TSharedPtr<SToonPreviewViewport> Viewport;
 

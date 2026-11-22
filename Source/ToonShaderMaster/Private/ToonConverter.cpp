@@ -11,6 +11,10 @@
 #include "ObjectTools.h"
 #include "ScopedTransaction.h"
 #include "ToonParamUtil.h"
+#include "Materials/MaterialInstance.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 namespace
 {
@@ -22,11 +26,120 @@ namespace
 
 	// 両マスター共通のテクスチャパラメータ名
 	const FName BaseColorParam(TEXT("BaseColor"));
+
+	// ---- 変換前マテリアルの記録(スロット名 \t オブジェクトパス の1行1スロット) ----
+	FString BackupFilePath(USkeletalMesh* Mesh)
+	{
+		FString Name = Mesh->GetOutermost()->GetName();
+		Name.ReplaceInline(TEXT("/"), TEXT("_"));
+		return FPaths::ProjectSavedDir() / TEXT("ToonShaderMaster") / TEXT("Backup") / (Name + TEXT(".txt"));
+	}
+
+	TMap<FString, FString> LoadBackup(const FString& Path)
+	{
+		TMap<FString, FString> Map;
+		FString Text;
+		if (FFileHelper::LoadFileToString(Text, *Path))
+		{
+			TArray<FString> Lines;
+			Text.ParseIntoArrayLines(Lines);
+			for (const FString& Line : Lines)
+			{
+				FString Key, Value;
+				if (Line.Split(TEXT("\t"), &Key, &Value))
+				{
+					Map.Add(Key, Value);
+				}
+			}
+		}
+		return Map;
+	}
+
+	bool IsToonMI(UMaterialInterface* M, UMaterialInterface* Master, UMaterialInterface* FaceMaster)
+	{
+		const UMaterialInstance* MI = Cast<UMaterialInstance>(M);
+		return MI && (MI->Parent == Master || MI->Parent == FaceMaster);
+	}
+
+	/** 変換する前に、トゥーン化されていないスロットの現在のマテリアルを記録する(トゥーン化済みのスロットは記録を残す) */
+	void SaveOriginalMaterials(USkeletalMesh* Mesh, UMaterialInterface* Master, UMaterialInterface* FaceMaster)
+	{
+		const FString Path = BackupFilePath(Mesh);
+		TMap<FString, FString> Map = LoadBackup(Path);
+
+		for (const FSkeletalMaterial& SM : Mesh->GetMaterials())
+		{
+			if (!IsToonMI(SM.MaterialInterface, Master, FaceMaster))
+			{
+				Map.Add(SM.MaterialSlotName.ToString(),
+					SM.MaterialInterface ? SM.MaterialInterface->GetPathName() : FString(TEXT("None")));
+			}
+		}
+
+		FString Out;
+		for (const TPair<FString, FString>& KV : Map)
+		{
+			Out += KV.Key + TEXT("\t") + KV.Value + TEXT("\n");
+		}
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+		FFileHelper::SaveStringToFile(Out, *Path);
+	}
 }
 
 UMaterialInterface* FToonConverter::GetMaster(bool bFace)
 {
 	return Cast<UMaterialInterface>(FSoftObjectPath(bFace ? FaceMasterPath : MasterPath).TryLoad());
+}
+
+bool FToonConverter::HasBackup(USkeletalMesh* Mesh)
+{
+	return Mesh && IFileManager::Get().FileExists(*BackupFilePath(Mesh));
+}
+
+int32 FToonConverter::RestoreOriginalMaterials(USkeletalMesh* Mesh, TArray<FString>& OutErrors)
+{
+	if (!Mesh)
+	{
+		return 0;
+	}
+
+	const TMap<FString, FString> Map = LoadBackup(BackupFilePath(Mesh));
+	if (Map.Num() == 0)
+	{
+		return 0;
+	}
+
+	FScopedTransaction Transaction(FText::FromString(TEXT("Toon MI を元のマテリアルへ戻す")));
+	Mesh->Modify();
+
+	int32 Restored = 0;
+	TArray<FSkeletalMaterial>& Mats = Mesh->GetMaterials();
+	for (FSkeletalMaterial& SM : Mats)
+	{
+		const FString* Path = Map.Find(SM.MaterialSlotName.ToString());
+		if (!Path)
+		{
+			continue;
+		}
+
+		UMaterialInterface* Orig = nullptr;
+		if (*Path != TEXT("None"))
+		{
+			Orig = Cast<UMaterialInterface>(FSoftObjectPath(*Path).TryLoad());
+			if (!Orig)
+			{
+				OutErrors.Add(FString::Printf(TEXT("元のマテリアルが見つかりません: %s (%s)"), **Path, *SM.MaterialSlotName.ToString()));
+				continue;
+			}
+		}
+
+		SM.MaterialInterface = Orig;
+		++Restored;
+	}
+
+	Mesh->PostEditChange();
+	Mesh->MarkPackageDirty();
+	return Restored;
 }
 
 UMaterialInterface* FToonConverter::GetOutlineMaster()
@@ -94,6 +207,9 @@ bool FToonConverter::Convert(USkeletalMesh* Mesh, const TArray<FToonConvertSlotI
 	{
 		return false;
 	}
+
+	// 変換前のマテリアルを記録(元に戻すボタン用)
+	SaveOriginalMaterials(Mesh, Master, FaceMaster);
 
 	IAssetTools& AssetTools = FAssetToolsModule::GetModule().Get();
 

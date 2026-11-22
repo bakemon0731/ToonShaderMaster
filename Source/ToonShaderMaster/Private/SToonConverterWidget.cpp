@@ -5,6 +5,8 @@
 #include "ToonParamUtil.h"
 #include "ToonOutlineBlueprint.h"
 #include "AssetThumbnail.h"
+#include "Styling/AppStyle.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Engine/Blueprint.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
@@ -35,10 +37,20 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 	DetailsArgs.NameAreaSettings = FDetailsViewArgs::HideNameArea;
 	DetailsView = PropertyModule.CreateDetailView(DetailsArgs);
 	OutlineDetailsView = PropertyModule.CreateDetailView(DetailsArgs);
-	GlobalDetailsView = PropertyModule.CreateDetailView(DetailsArgs);
+	GlobalMasterDetailsView = PropertyModule.CreateDetailView(DetailsArgs);
+	GlobalOutlineDetailsView = PropertyModule.CreateDetailView(DetailsArgs);
 
-	GlobalSettings = NewObject<UToonGlobalSettings>(GetTransientPackage());
-	GlobalDetailsView->SetObject(GlobalSettings);
+	// 全体設定: スロットごとに違うBaseColorテクスチャは一括の対象にしない
+	GlobalMaster = NewObject<UToonMasterSettings>(GetTransientPackage());
+	GlobalOutline = NewObject<UToonOutlineSettings>(GetTransientPackage());
+	GlobalMasterDetailsView->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateLambda(
+		[](const FPropertyAndParent& PropertyAndParent)
+		{
+			return PropertyAndParent.Property.GetFName() != FName(TEXT("BaseColor"));
+		}));
+	GlobalMasterDetailsView->SetObject(GlobalMaster);
+	GlobalOutlineDetailsView->SetObject(GlobalOutline);
+
 	ThumbnailPool = MakeShared<FAssetThumbnailPool>(64);
 
 	// スライダー操作中も含めて、設定値の変更をプレビューへ即反映する
@@ -48,30 +60,17 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 	[
 		SNew(SSplitter)
 
-		// 左: 3Dプレビュー
-		+ SSplitter::Slot().Value(0.55f)
-		[
-			SAssignNew(Viewport, SToonPreviewViewport)
-		]
-
-		// 右: 操作パネル
-		+ SSplitter::Slot().Value(0.45f)
+		// 左: 3Dプレビュー + ライト向き
+		+ SSplitter::Slot().Value(0.34f)
 		[
 			SNew(SVerticalBox)
 
-			+ SVerticalBox::Slot().AutoHeight().Padding(8)
+			+ SVerticalBox::Slot().FillHeight(1.f)
 			[
-				SNew(SObjectPropertyEntryBox)
-				.AllowedClass(USkeletalMesh::StaticClass())
-				.ObjectPath(this, &SToonConverterWidget::GetMeshPath)
-				.OnObjectChanged(this, &SToonConverterWidget::OnMeshChanged)
-				.AllowClear(true)
-				.DisplayUseSelected(true)
-				.DisplayBrowse(true)
+				SAssignNew(Viewport, SToonPreviewViewport)
 			]
 
-			// ライト向き
-			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
@@ -105,54 +104,83 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 					})
 				]
 			]
+		]
 
-			// 全体設定(全スロットへ一括反映)
-			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
+		// 中: スロット一覧 + 全体設定 + 実行ボタン
+		+ SSplitter::Slot().Value(0.31f)
+		[
+			SNew(SVerticalBox)
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(8)
 			[
-				SNew(STextBlock).Text(FText::FromString(TEXT("全体設定(変更すると全スロットへ一括反映)")))
+				SNew(SObjectPropertyEntryBox)
+				.AllowedClass(USkeletalMesh::StaticClass())
+				.ObjectPath(this, &SToonConverterWidget::GetMeshPath)
+				.OnObjectChanged(this, &SToonConverterWidget::OnMeshChanged)
+				.AllowClear(true)
+				.DisplayUseSelected(true)
+				.DisplayBrowse(true)
 			]
+
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0)
 			[
-				SNew(SBox).MaxDesiredHeight(130.f)
-				[
-					GlobalDetailsView.ToSharedRef()
-				]
-			]
-
-			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
-			[
 				SNew(STextBlock)
-				.Text(FText::FromString(TEXT("スロット(顔=顔用シェーダー / 線=アウトラインを付ける。行を選ぶと下で調整できます)")))
+				.Text(FText::FromString(TEXT("スロット(顔=顔用シェーダー / 線=アウトライン。行を選ぶと右で詳細を調整)")))
 				.AutoWrapText(true)
 			]
 
-			// スロット一覧
-			+ SVerticalBox::Slot().AutoHeight().Padding(8)
+			+ SVerticalBox::Slot().FillHeight(0.45f).Padding(8)
 			[
-				SNew(SBox).MaxDesiredHeight(240.f)
+				SAssignNew(ListView, SListView<TSharedPtr<FToonSlotEntry>>)
+				.ListItemsSource(&Entries)
+				.OnGenerateRow(this, &SToonConverterWidget::OnGenerateRow)
+				.OnSelectionChanged(this, &SToonConverterWidget::OnSlotSelected)
+				.SelectionMode(ESelectionMode::Single)
+			]
+
+			// 全体設定(タブで MM_ToonShader / M_ToonOutline を切り替え)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0)
+			[
+				SNew(STextBlock).Text(FText::FromString(TEXT("全体設定(変更すると全スロットへ一括反映)")))
+			]
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 4)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f)
 				[
-					SAssignNew(ListView, SListView<TSharedPtr<FToonSlotEntry>>)
-					.ListItemsSource(&Entries)
-					.OnGenerateRow(this, &SToonConverterWidget::OnGenerateRow)
-					.OnSelectionChanged(this, &SToonConverterWidget::OnSlotSelected)
-					.SelectionMode(ESelectionMode::Single)
+					SNew(SCheckBox)
+					.Style(&FAppStyle::Get().GetWidgetStyle<FCheckBoxStyle>("ToggleButtonCheckbox"))
+					.IsChecked_Lambda([this]() { return GlobalTab == 0 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+					.OnCheckStateChanged_Lambda([this](ECheckBoxState) { GlobalTab = 0; })
+					[
+						SNew(STextBlock).Text(FText::FromString(TEXT("MM_ToonShader"))).Justification(ETextJustify::Center)
+					]
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.f)
+				[
+					SNew(SCheckBox)
+					.Style(&FAppStyle::Get().GetWidgetStyle<FCheckBoxStyle>("ToggleButtonCheckbox"))
+					.IsChecked_Lambda([this]() { return GlobalTab == 1 ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+					.OnCheckStateChanged_Lambda([this](ECheckBoxState) { GlobalTab = 1; })
+					[
+						SNew(STextBlock).Text(FText::FromString(TEXT("M_ToonOutline"))).Justification(ETextJustify::Center)
+					]
 				]
 			]
 
-			// 選択スロットのパラメータ(トゥーン)
-			+ SVerticalBox::Slot().FillHeight(1.f).Padding(8, 0)
+			+ SVerticalBox::Slot().FillHeight(0.55f).Padding(8, 0)
 			[
-				DetailsView.ToSharedRef()
-			]
-
-			// 選択スロットのパラメータ(アウトライン)
-			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
-			[
-				SNew(STextBlock).Text(FText::FromString(TEXT("アウトライン設定(選択中のスロット)")))
-			]
-			+ SVerticalBox::Slot().FillHeight(0.7f).Padding(8, 0)
-			[
-				OutlineDetailsView.ToSharedRef()
+				SNew(SWidgetSwitcher)
+				.WidgetIndex_Lambda([this]() { return GlobalTab; })
+				+ SWidgetSwitcher::Slot()
+				[
+					GlobalMasterDetailsView.ToSharedRef()
+				]
+				+ SWidgetSwitcher::Slot()
+				[
+					GlobalOutlineDetailsView.ToSharedRef()
+				]
 			]
 
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
@@ -167,10 +195,57 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 
 			+ SVerticalBox::Slot().AutoHeight().Padding(8)
 			[
-				SNew(SButton)
-				.HAlign(HAlign_Center)
-				.Text(FText::FromString(TEXT("変換して適用")))
-				.OnClicked(this, &SToonConverterWidget::OnConvertClicked)
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f).Padding(0, 0, 4, 0)
+				[
+					SNew(SButton)
+					.HAlign(HAlign_Center)
+					.Text(FText::FromString(TEXT("変換して適用")))
+					.OnClicked(this, &SToonConverterWidget::OnConvertClicked)
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.f).Padding(4, 0, 0, 0)
+				[
+					SNew(SButton)
+					.HAlign(HAlign_Center)
+					.Text(FText::FromString(TEXT("元に戻す")))
+					.ToolTipText(FText::FromString(TEXT("メッシュのマテリアルを、変換前のマテリアルへ戻します")))
+					.OnClicked(this, &SToonConverterWidget::OnRestoreClicked)
+				]
+			]
+		]
+
+		// 右: 選択スロットの詳細
+		+ SSplitter::Slot().Value(0.35f)
+		[
+			SNew(SVerticalBox)
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(8)
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]()
+				{
+					if (!SelectedEntry.IsValid())
+					{
+						return FText::FromString(TEXT("詳細(スロットを選択してください)"));
+					}
+					return FText::FromString(FString::Printf(TEXT("詳細: [%d] %s"),
+						SelectedEntry->Index, *SelectedEntry->SlotName.ToString()));
+				})
+			]
+
+			+ SVerticalBox::Slot().FillHeight(1.f).Padding(8, 0)
+			[
+				DetailsView.ToSharedRef()
+			]
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
+			[
+				SNew(STextBlock).Text(FText::FromString(TEXT("アウトライン")))
+			]
+
+			+ SVerticalBox::Slot().FillHeight(0.7f).Padding(8, 0, 8, 8)
+			[
+				OutlineDetailsView.ToSharedRef()
 			]
 		]
 	];
@@ -185,7 +260,8 @@ SToonConverterWidget::~SToonConverterWidget()
 
 void SToonConverterWidget::AddReferencedObjects(FReferenceCollector& Collector)
 {
-	Collector.AddReferencedObject(GlobalSettings);
+	Collector.AddReferencedObject(GlobalMaster);
+	Collector.AddReferencedObject(GlobalOutline);
 	for (TSharedPtr<FToonSlotEntry>& E : Entries)
 	{
 		if (E.IsValid())
@@ -207,6 +283,11 @@ FString SToonConverterWidget::GetMeshPath() const
 void SToonConverterWidget::OnMeshChanged(const FAssetData& AssetData)
 {
 	Mesh = Cast<USkeletalMesh>(AssetData.GetAsset());
+	RefreshAll();
+}
+
+void SToonConverterWidget::RefreshAll()
+{
 	BuildEntries();
 
 	Viewport->SetMesh(Mesh.Get());
@@ -452,22 +533,26 @@ void SToonConverterWidget::RebuildOutlinePreviewMID(FToonSlotEntry& Entry)
 
 void SToonConverterWidget::SyncGlobalFromEntries()
 {
-	if (Entries.Num() == 0 || !GlobalSettings)
+	if (Entries.Num() == 0 || !GlobalMaster || !GlobalOutline)
 	{
 		return;
 	}
 
-	// 全体設定の表示は先頭スロットの値に合わせる
+	// 全体設定の表示は先頭スロットの値に合わせる(BaseColorは対象外)
 	const TSharedPtr<FToonSlotEntry>& First = Entries[0];
-	GlobalSettings->ShadowColor = First->MasterSettings->ShadowColor;
-	GlobalSettings->ShadowOuterColor = First->MasterSettings->ShadowOuterColor;
-	GlobalSettings->OutlineThickness = First->OutlineSettings->OutlineThickness;
-	GlobalDetailsView->ForceRefresh();
+	ToonParamUtil::CopyValues(GlobalMaster, First->MasterSettings, FName(TEXT("BaseColor")));
+	ToonParamUtil::CopyValues(GlobalOutline, First->OutlineSettings);
+	GlobalMasterDetailsView->ForceRefresh();
+	GlobalOutlineDetailsView->ForceRefresh();
 }
 
-void SToonConverterWidget::ApplyGlobalChange(FName PropertyName)
+void SToonConverterWidget::ApplyGlobalChange(UObject* GlobalObject, FName PropertyName)
 {
-	const bool bAll = PropertyName.IsNone();
+	const FName SkipName(TEXT("BaseColor"));
+	if (PropertyName == SkipName)
+	{
+		return;
+	}
 
 	for (const TSharedPtr<FToonSlotEntry>& E : Entries)
 	{
@@ -476,26 +561,35 @@ void SToonConverterWidget::ApplyGlobalChange(FName PropertyName)
 			continue;
 		}
 
-		if (bAll || PropertyName == GET_MEMBER_NAME_CHECKED(UToonGlobalSettings, ShadowColor))
+		if (GlobalObject == GlobalMaster.Get())
 		{
-			E->MasterSettings->ShadowColor = GlobalSettings->ShadowColor;
+			if (PropertyName.IsNone())
+			{
+				ToonParamUtil::CopyValues(E->MasterSettings, GlobalMaster, SkipName);
+			}
+			else
+			{
+				ToonParamUtil::CopyProperty(E->MasterSettings, GlobalMaster, PropertyName);
+			}
+			if (E->PreviewMID)
+			{
+				ToonParamUtil::ApplyToMID(E->GetActiveSettings(), E->PreviewMID);
+			}
 		}
-		if (bAll || PropertyName == GET_MEMBER_NAME_CHECKED(UToonGlobalSettings, ShadowOuterColor))
+		else
 		{
-			E->MasterSettings->ShadowOuterColor = GlobalSettings->ShadowOuterColor;
-		}
-		if (bAll || PropertyName == GET_MEMBER_NAME_CHECKED(UToonGlobalSettings, OutlineThickness))
-		{
-			E->OutlineSettings->OutlineThickness = GlobalSettings->OutlineThickness;
-		}
-
-		if (E->PreviewMID)
-		{
-			ToonParamUtil::ApplyToMID(E->GetActiveSettings(), E->PreviewMID);
-		}
-		if (E->OutlinePreviewMID)
-		{
-			ToonParamUtil::ApplyToMID(E->OutlineSettings, E->OutlinePreviewMID);
+			if (PropertyName.IsNone())
+			{
+				ToonParamUtil::CopyValues(E->OutlineSettings, GlobalOutline);
+			}
+			else
+			{
+				ToonParamUtil::CopyProperty(E->OutlineSettings, GlobalOutline, PropertyName);
+			}
+			if (E->OutlinePreviewMID)
+			{
+				ToonParamUtil::ApplyToMID(E->OutlineSettings, E->OutlinePreviewMID);
+			}
 		}
 	}
 
@@ -511,9 +605,11 @@ void SToonConverterWidget::OnObjectPropertyChanged(UObject* Object, FPropertyCha
 		return;
 	}
 
-	if (Object == GlobalSettings.Get())
+	if (Object == GlobalMaster.Get() || Object == GlobalOutline.Get())
 	{
-		ApplyGlobalChange(Event.Property ? Event.Property->GetFName() : NAME_None);
+		// 構造体(色)の中の1チャンネルを触った場合は、親のメンバー名で扱う
+		const FProperty* P = Event.MemberProperty ? Event.MemberProperty : Event.Property;
+		ApplyGlobalChange(Object, P ? P->GetFName() : NAME_None);
 		return;
 	}
 
@@ -534,6 +630,45 @@ void SToonConverterWidget::OnObjectPropertyChanged(UObject* Object, FPropertyCha
 			return;
 		}
 	}
+}
+
+FReply SToonConverterWidget::OnRestoreClicked()
+{
+	USkeletalMesh* M = Mesh.Get();
+	if (!M)
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(TEXT("スケルタルメッシュを選択してください。")));
+		return FReply::Handled();
+	}
+
+	if (!FToonConverter::HasBackup(M))
+	{
+		FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(
+			TEXT("元のマテリアルの記録がありません。\nこのツールで変換したときに自動で記録されます(Saved/ToonShaderMaster/Backup)。")));
+		return FReply::Handled();
+	}
+
+	const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNo, FText::FromString(
+		TEXT("メッシュのマテリアルを、変換前のマテリアルへ戻します。\n(作成済みのMIやBP Actorは削除されません)\nよろしいですか？")));
+	if (Answer != EAppReturnType::Yes)
+	{
+		return FReply::Handled();
+	}
+
+	TArray<FString> Errors;
+	const int32 Restored = FToonConverter::RestoreOriginalMaterials(M, Errors);
+
+	// 戻した状態でプレビューとスロット一覧を作り直す
+	RefreshAll();
+
+	FString Msg = FString::Printf(TEXT("元のマテリアルへ戻したスロット: %d"), Restored);
+	for (const FString& Err : Errors)
+	{
+		Msg += TEXT("\n") + Err;
+	}
+	FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Msg));
+
+	return FReply::Handled();
 }
 
 FReply SToonConverterWidget::OnConvertClicked()

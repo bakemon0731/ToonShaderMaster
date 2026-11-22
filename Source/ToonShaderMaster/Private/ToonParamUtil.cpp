@@ -163,3 +163,34 @@ void ToonParamUtil::LoadFromMaterial(UObject* Settings, UMaterialInterface* Mat)
 		}
 	}
 }
+
+void ToonParamUtil::CopyValues(UObject* Dst, const UObject* Src, FName SkipName)
+{
+	if (!Dst || !Src || Dst->GetClass() != Src->GetClass())
+	{
+		return;
+	}
+
+	for (TFieldIterator<FProperty> It(Dst->GetClass()); It; ++It)
+	{
+		FProperty* P = *It;
+		if (P->GetFName() == SkipName)
+		{
+			continue;
+		}
+		P->CopyCompleteValue_InContainer(Dst, Src);
+	}
+}
+
+void ToonParamUtil::CopyProperty(UObject* Dst, const UObject* Src, FName PropertyName)
+{
+	if (!Dst || !Src || Dst->GetClass() != Src->GetClass())
+	{
+		return;
+	}
+
+	if (FProperty* P = Dst->GetClass()->FindPropertyByName(PropertyName))
+	{
+		P->CopyCompleteValue_InContainer(Dst, Src);
+	}
+}
