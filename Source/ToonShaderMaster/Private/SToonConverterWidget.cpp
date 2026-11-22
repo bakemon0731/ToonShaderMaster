@@ -4,6 +4,8 @@
 #include "ToonConverter.h"
 #include "ToonParamUtil.h"
 #include "ToonOutlineBlueprint.h"
+#include "ToonSlotInitializer.h"
+#include "ToonPreviewMaterial.h"
 #include "AssetThumbnail.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
@@ -415,6 +417,7 @@ void SToonConverterWidget::AddReferencedObjects(FReferenceCollector& Collector)
 			Collector.AddReferencedObject(E->FaceSettings);
 			Collector.AddReferencedObject(E->OutlineSettings);
 			Collector.AddReferencedObject(E->PreviewMID);
+			Collector.AddReferencedObject(E->PreviewStaticMIC);
 			Collector.AddReferencedObject(E->OutlinePreviewMID);
 		}
 	}
@@ -457,64 +460,12 @@ void SToonConverterWidget::BuildEntries()
 
 	if (USkeletalMesh* M = Mesh.Get())
 	{
-		UMaterialInterface* MasterMat = FToonConverter::GetMaster(false);
-		UMaterialInterface* FaceMat = FToonConverter::GetMaster(true);
-		UMaterialInterface* OutlineMat = FToonConverter::GetOutlineMaster();
-
-		const TArray<FSkeletalMaterial>& Mats = M->GetMaterials();
-		for (int32 i = 0; i < Mats.Num(); ++i)
+		const FToonMasters Masters = FToonMasters::Load();
+		const int32 NumSlots = M->GetMaterials().Num();
+		for (int32 i = 0; i < NumSlots; ++i)
 		{
-			UMaterialInterface* Orig = Mats[i].MaterialInterface;
-
 			TSharedPtr<FToonSlotEntry> E = MakeShared<FToonSlotEntry>();
-			E->Index = i;
-			E->SlotName = Mats[i].MaterialSlotName;
-			E->MaterialName = Orig ? Orig->GetName() : TEXT("None");
-			E->MasterSettings = NewObject<UToonMasterSettings>(GetTransientPackage());
-			E->FaceSettings = NewObject<UToonFaceSettings>(GetTransientPackage());
-			E->OutlineSettings = NewObject<UToonOutlineSettings>(GetTransientPackage());
-
-			// アウトライン: マスターの値を初期値にし、作成済みのアウトラインMIがあればその値と有効状態を読み戻す
-			if (OutlineMat)
-			{
-				ToonParamUtil::LoadFromMaterial(E->OutlineSettings, OutlineMat);
-			}
-			{
-				// 作成済みのアウトラインMIがあり、親が M_ToonOutline ならチェック済みとして値を読み戻す
-				// (チェックを外したときは親が M_Empty に付け替えられている)
-				const FString OutlinePkg = FToonConverter::GetOutlineMIPackageName(M, E->SlotName);
-				if (FPackageName::DoesPackageExist(OutlinePkg))
-				{
-					const FString OutlineObj = OutlinePkg + TEXT(".") + FPackageName::GetLongPackageAssetName(OutlinePkg);
-					if (UMaterialInstanceConstant* OMI = LoadObject<UMaterialInstanceConstant>(nullptr, *OutlineObj))
-					{
-						ToonParamUtil::LoadFromMaterial(E->OutlineSettings, OMI);
-						E->bOutline = (OutlineMat && OMI->Parent == OutlineMat);
-					}
-				}
-			}
-
-			// 元マテリアルのテクスチャを初期値にする(BaseColorはマスターの値より優先)
-			if (UTexture2D* Src = Cast<UTexture2D>(FToonConverter::FindSourceTexture(Orig)))
-			{
-				E->MasterSettings->BaseColor = Src;
-				E->FaceSettings->BaseColor = Src;
-			}
-
-			// すでにトゥーンMIが適用済みなら、顔かどうかと調整値を読み戻す
-			if (const UMaterialInstance* MI = Cast<UMaterialInstance>(Orig))
-			{
-				if (FaceMat && MI->Parent == FaceMat)
-				{
-					E->bFace = true;
-					ToonParamUtil::LoadFromMaterial(E->FaceSettings, Orig);
-				}
-				else if (MasterMat && MI->Parent == MasterMat)
-				{
-					ToonParamUtil::LoadFromMaterial(E->MasterSettings, Orig);
-				}
-			}
-
+			ToonSlotInitializer::Initialize(*E, M, i, Masters);
 			Entries.Add(E);
 		}
 	}
@@ -641,14 +592,15 @@ void SToonConverterWidget::SetFace(TSharedPtr<FToonSlotEntry> Entry, bool bFace)
 
 void SToonConverterWidget::RebuildPreviewMID(FToonSlotEntry& Entry)
 {
-	UMaterialInterface* Parent = FToonConverter::GetMaster(Entry.bFace);
-	if (!Parent)
+	UMaterialInterface* Master = FToonConverter::GetMaster(Entry.bFace);
+	if (!Master)
 	{
 		return;
 	}
 
-	Entry.PreviewMID = UMaterialInstanceDynamic::Create(Parent, GetTransientPackage());
-	ToonParamUtil::ApplyToMID(Entry.GetActiveSettings(), Entry.PreviewMID);
+	// Static Switch(FaceSDFTexture など)も反映したプレビューを作る
+	Entry.PreviewMID = ToonPreviewMaterial::Create(
+		Master, Entry.GetActiveSettings(), GetTransientPackage(), Entry.PreviewStaticMIC);
 	Viewport->SetSlotMaterial(Entry.Index, Entry.PreviewMID);
 }
 
@@ -738,9 +690,9 @@ void SToonConverterWidget::ApplyGlobalChange(UObject* GlobalObject, FName Proper
 		}
 	}
 
-	// 選択中スロットの表示を更新
-	DetailsView->ForceRefresh();
-	OutlineDetailsView->ForceRefresh();
+	// 選択中スロットの詳細は ForceRefresh しない。
+	// ForceRefresh は詳細パネルのウィジェットを作り直すため、操作中のカラーピッカーが閉じてしまう。
+	// 値は詳細パネルが毎フレーム読みに行くので、そのままで表示は追従する。
 }
 
 void SToonConverterWidget::OnObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event)
@@ -766,7 +718,16 @@ void SToonConverterWidget::OnObjectPropertyChanged(UObject* Object, FPropertyCha
 		}
 		if (E->PreviewMID && E->GetActiveSettings() == Object)
 		{
-			ToonParamUtil::ApplyToMID(Object, E->PreviewMID);
+			// Static Switch(bool)はMIDでは変えられないので、変わったときだけプレビューのマテリアルを作り直す
+			const FProperty* Changed = Event.MemberProperty ? Event.MemberProperty : Event.Property;
+			if (Changed && Changed->IsA<FBoolProperty>())
+			{
+				RebuildPreviewMID(*E);
+			}
+			else
+			{
+				ToonParamUtil::ApplyToMID(Object, E->PreviewMID);
+			}
 			return;
 		}
 		if (E->OutlinePreviewMID && E->OutlineSettings == Object)

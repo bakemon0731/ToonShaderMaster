@@ -62,6 +62,38 @@ void ToonParamUtil::ApplyToMID(UObject* Settings, UMaterialInstanceDynamic* MID)
 	}
 }
 
+bool ToonParamUtil::HasNonDefaultStaticSwitch(const UObject* Settings)
+{
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const UObject* CDO = Settings->GetClass()->GetDefaultObject();
+	for (TFieldIterator<FBoolProperty> It(Settings->GetClass()); It; ++It)
+	{
+		if (!It->Identical_InContainer(Settings, CDO))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void ToonParamUtil::ApplyStaticSwitches(UObject* Settings, UMaterialInstanceConstant* MI)
+{
+	if (!Settings || !MI)
+	{
+		return;
+	}
+
+	for (TFieldIterator<FBoolProperty> It(Settings->GetClass()); It; ++It)
+	{
+		UMaterialEditingLibrary::SetMaterialInstanceStaticSwitchParameterValue(
+			MI, ParamNameOf(*It), It->GetPropertyValue_InContainer(Settings));
+	}
+}
+
 void ToonParamUtil::ApplyToMI(UObject* Settings, UMaterialInstanceConstant* MI, bool bWriteAll)
 {
 	if (!Settings || !MI)

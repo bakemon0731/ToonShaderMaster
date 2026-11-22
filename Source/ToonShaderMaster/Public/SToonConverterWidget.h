@@ -5,40 +5,13 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 #include "AssetRegistry/AssetData.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "ToonSlotSettings.h"
+#include "ToonSlotEntry.h"
 
 class USkeletalMesh;
 class IDetailsView;
 class FAssetThumbnailPool;
 class SToonPreviewViewport;
 struct FPropertyChangedEvent;
-
-/** マテリアルスロット1つ分の編集状態 */
-struct FToonSlotEntry
-{
-	int32 Index = 0;
-	FName SlotName;
-	FString MaterialName;
-	bool bFace = false;
-	/** このスロットにアウトラインを付けるか */
-	bool bOutline = false;
-
-	// 顔/顔以外のどちらに切り替えても値を失わないよう、両方持つ
-	TObjectPtr<UToonMasterSettings> MasterSettings = nullptr;
-	TObjectPtr<UToonFaceSettings> FaceSettings = nullptr;
-
-	TObjectPtr<UToonOutlineSettings> OutlineSettings = nullptr;
-
-	/** 3Dプレビュー用のマテリアル */
-	TObjectPtr<UMaterialInstanceDynamic> PreviewMID = nullptr;
-	TObjectPtr<UMaterialInstanceDynamic> OutlinePreviewMID = nullptr;
-
-	UObject* GetActiveSettings() const
-	{
-		return bFace ? static_cast<UObject*>(FaceSettings.Get()) : static_cast<UObject*>(MasterSettings.Get());
-	}
-};
 
 class SToonConverterWidget : public SCompoundWidget, public FGCObject
 {

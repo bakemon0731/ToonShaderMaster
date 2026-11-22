@@ -83,7 +83,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Texture")
 	TObjectPtr<UTexture2D> BaseColor = nullptr;
 
-	UPROPERTY(EditAnywhere, Category = "Texture")
+	/**
+	 * Static Switch: FaceSDFTexture (M_ToonFaceShader のデフォルトはFalse)。
+	 * チェックしたときだけ FaceSDF テクスチャ欄を表示し、MIにもスイッチをTrueで書き込む。
+	 */
+	UPROPERTY(EditAnywhere, Category = "Texture", meta = (ToonParam = "FaceSDFTexture"))
+	bool bUseFaceSDFTexture = false;
+
+	UPROPERTY(EditAnywhere, Category = "Texture", meta = (EditCondition = "bUseFaceSDFTexture", EditConditionHides))
 	TObjectPtr<UTexture2D> FaceSDF = nullptr;
 
 	UPROPERTY(EditAnywhere, Category = "Texture", meta = (UIMin = "0.0", UIMax = "5.0"))
