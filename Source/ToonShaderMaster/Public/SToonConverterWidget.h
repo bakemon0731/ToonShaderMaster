@@ -10,6 +10,7 @@
 
 class USkeletalMesh;
 class IDetailsView;
+class FAssetThumbnailPool;
 class SToonPreviewViewport;
 struct FPropertyChangedEvent;
 
@@ -64,6 +65,8 @@ private:
 	void SetOutline(TSharedPtr<FToonSlotEntry> Entry, bool bOutline);
 	void RebuildPreviewMID(FToonSlotEntry& Entry);
 	void RebuildOutlinePreviewMID(FToonSlotEntry& Entry);
+	void SyncGlobalFromEntries();
+	void ApplyGlobalChange(FName PropertyName);
 	void OnObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
 
 	FReply OnConvertClicked();
@@ -75,6 +78,9 @@ private:
 	TSharedPtr<SListView<TSharedPtr<FToonSlotEntry>>> ListView;
 	TSharedPtr<IDetailsView> DetailsView;
 	TSharedPtr<IDetailsView> OutlineDetailsView;
+	TSharedPtr<IDetailsView> GlobalDetailsView;
+	TSharedPtr<FAssetThumbnailPool> ThumbnailPool;
+	TObjectPtr<UToonGlobalSettings> GlobalSettings = nullptr;
 	bool bCreateBlueprint = true;
 	TSharedPtr<SToonPreviewViewport> Viewport;
 

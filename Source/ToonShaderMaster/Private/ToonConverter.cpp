@@ -18,6 +18,7 @@ namespace
 	const TCHAR* MasterPath = TEXT("/ToonShaderMaster/Materials/MM_ToonShader.MM_ToonShader");
 	const TCHAR* FaceMasterPath = TEXT("/ToonShaderMaster/Materials/M_ToonFaceShader.M_ToonFaceShader");
 	const TCHAR* OutlineMasterPath = TEXT("/ToonShaderMaster/Materials/M_ToonOutline.M_ToonOutline");
+	const TCHAR* EmptyMaterialPath = TEXT("/ToonShaderMaster/Materials/M_Empty.M_Empty");
 
 	// 両マスター共通のテクスチャパラメータ名
 	const FName BaseColorParam(TEXT("BaseColor"));
@@ -33,9 +34,9 @@ UMaterialInterface* FToonConverter::GetOutlineMaster()
 	return Cast<UMaterialInterface>(FSoftObjectPath(OutlineMasterPath).TryLoad());
 }
 
-FName FToonConverter::GetOutlineEnabledParam()
+UMaterialInterface* FToonConverter::GetEmptyMaterial()
 {
-	return FName(TEXT("OutlineEnabled"));
+	return Cast<UMaterialInterface>(FSoftObjectPath(EmptyMaterialPath).TryLoad());
 }
 
 FString FToonConverter::GetOutlineMIPackageName(USkeletalMesh* Mesh, FName SlotName)
@@ -193,6 +194,13 @@ bool FToonConverter::ConvertOutline(USkeletalMesh* Mesh, const TArray<FToonOutli
 		return false;
 	}
 
+	UMaterialInterface* EmptyMaterial = GetEmptyMaterial();
+	if (!EmptyMaterial)
+	{
+		OutResult.Errors.Add(FString::Printf(TEXT("空マテリアルが見つかりません: %s"), EmptyMaterialPath));
+		return false;
+	}
+
 	IAssetTools& AssetTools = FAssetToolsModule::GetModule().Get();
 	const FString Dir = FPackageName::GetLongPackagePath(Mesh->GetOutermost()->GetName()) / TEXT("Materials");
 
@@ -204,6 +212,23 @@ bool FToonConverter::ConvertOutline(USkeletalMesh* Mesh, const TArray<FToonOutli
 
 		const FString PackageName = GetOutlineMIPackageName(Mesh, SlotName);
 		const FString AssetName = FPackageName::GetLongPackageAssetName(PackageName);
+
+		// チェックなし: M_Empty を当てる。以前作ったMIがあれば親を付け替えて「無効」を記録しておく
+		if (!Input.bEnabled)
+		{
+			if (FPackageName::DoesPackageExist(PackageName))
+			{
+				if (UMaterialInstanceConstant* Old = LoadObject<UMaterialInstanceConstant>(nullptr, *(PackageName + TEXT(".") + AssetName)))
+				{
+					Old->Modify();
+					Old->SetParentEditorOnly(EmptyMaterial);
+					Old->PostEditChange();
+					Old->MarkPackageDirty();
+				}
+			}
+			OutResult.OutlineMaterials.Add(EmptyMaterial);
+			continue;
+		}
 
 		UMaterialInstanceConstant* MI = nullptr;
 		bool bReused = false;
@@ -243,9 +268,6 @@ bool FToonConverter::ConvertOutline(USkeletalMesh* Mesh, const TArray<FToonOutli
 		{
 			ToonParamUtil::ApplyToMI(Input.Settings, MI, bReused);
 		}
-
-		// 有効/無効は常に明示的に書く(無効スロットは描画されない)
-		MI->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(GetOutlineEnabledParam()), Input.bEnabled ? 1.f : 0.f);
 
 		MI->PostEditChange();
 		MI->MarkPackageDirty();

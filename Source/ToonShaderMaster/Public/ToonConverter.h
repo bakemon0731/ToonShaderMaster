@@ -48,15 +48,16 @@ public:
 	/** アウトライン用マスター(M_ToonOutline)をロードして返す */
 	static UMaterialInterface* GetOutlineMaster();
 
-	/** アウトラインMIの有効/無効を切り替えるスカラーパラメータ名(マスター側に追加が必要) */
-	static FName GetOutlineEnabledParam();
+	/** アウトラインを使わないスロットに当てる空マテリアル(M_Empty)をロードして返す */
+	static UMaterialInterface* GetEmptyMaterial();
 
 	/** スロットのアウトラインMIのパッケージ名(メッシュと同じフォルダ/Materials) */
 	static FString GetOutlineMIPackageName(USkeletalMesh* Mesh, FName SlotName);
 
 	/**
-	 * 全スロット分のアウトラインMIを作る(無効スロットは OutlineEnabled=0 で描画されない)。
-	 * 結果は OutResult.OutlineMaterials に入る。
+	 * チェックしたスロットのアウトラインMIを作る。チェックしていないスロットは M_Empty を当てる
+	 * (MIは作らない。以前作ったMIが残っていれば、親を M_Empty に付け替えて「無効」を記録する)。
+	 * 結果は OutResult.OutlineMaterials(スロット順)に入る。
 	 */
 	static bool ConvertOutline(USkeletalMesh* Mesh, const TArray<FToonOutlineSlotInput>& Slots, FToonConvertResult& OutResult);
 

@@ -4,6 +4,7 @@
 #include "ToonConverter.h"
 #include "ToonParamUtil.h"
 #include "ToonOutlineBlueprint.h"
+#include "AssetThumbnail.h"
 #include "Engine/Blueprint.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
@@ -34,6 +35,11 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 	DetailsArgs.NameAreaSettings = FDetailsViewArgs::HideNameArea;
 	DetailsView = PropertyModule.CreateDetailView(DetailsArgs);
 	OutlineDetailsView = PropertyModule.CreateDetailView(DetailsArgs);
+	GlobalDetailsView = PropertyModule.CreateDetailView(DetailsArgs);
+
+	GlobalSettings = NewObject<UToonGlobalSettings>(GetTransientPackage());
+	GlobalDetailsView->SetObject(GlobalSettings);
+	ThumbnailPool = MakeShared<FAssetThumbnailPool>(64);
 
 	// スライダー操作中も含めて、設定値の変更をプレビューへ即反映する
 	FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &SToonConverterWidget::OnObjectPropertyChanged);
@@ -100,6 +106,19 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 				]
 			]
 
+			// 全体設定(全スロットへ一括反映)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
+			[
+				SNew(STextBlock).Text(FText::FromString(TEXT("全体設定(変更すると全スロットへ一括反映)")))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0)
+			[
+				SNew(SBox).MaxDesiredHeight(130.f)
+				[
+					GlobalDetailsView.ToSharedRef()
+				]
+			]
+
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
 			[
 				SNew(STextBlock)
@@ -110,7 +129,7 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 			// スロット一覧
 			+ SVerticalBox::Slot().AutoHeight().Padding(8)
 			[
-				SNew(SBox).MaxDesiredHeight(160.f)
+				SNew(SBox).MaxDesiredHeight(240.f)
 				[
 					SAssignNew(ListView, SListView<TSharedPtr<FToonSlotEntry>>)
 					.ListItemsSource(&Entries)
@@ -166,6 +185,7 @@ SToonConverterWidget::~SToonConverterWidget()
 
 void SToonConverterWidget::AddReferencedObjects(FReferenceCollector& Collector)
 {
+	Collector.AddReferencedObject(GlobalSettings);
 	for (TSharedPtr<FToonSlotEntry>& E : Entries)
 	{
 		if (E.IsValid())
@@ -234,6 +254,8 @@ void SToonConverterWidget::BuildEntries()
 				ToonParamUtil::LoadFromMaterial(E->OutlineSettings, OutlineMat);
 			}
 			{
+				// 作成済みのアウトラインMIがあり、親が M_ToonOutline ならチェック済みとして値を読み戻す
+				// (チェックを外したときは親が M_Empty に付け替えられている)
 				const FString OutlinePkg = FToonConverter::GetOutlineMIPackageName(M, E->SlotName);
 				if (FPackageName::DoesPackageExist(OutlinePkg))
 				{
@@ -241,19 +263,9 @@ void SToonConverterWidget::BuildEntries()
 					if (UMaterialInstanceConstant* OMI = LoadObject<UMaterialInstanceConstant>(nullptr, *OutlineObj))
 					{
 						ToonParamUtil::LoadFromMaterial(E->OutlineSettings, OMI);
-						float Enabled = 0.f;
-						if (OMI->GetScalarParameterValue(FHashedMaterialParameterInfo(FToonConverter::GetOutlineEnabledParam()), Enabled))
-						{
-							E->bOutline = Enabled > 0.5f;
-						}
+						E->bOutline = (OutlineMat && OMI->Parent == OutlineMat);
 					}
 				}
-			}
-
-			// 顔マスターに設定済みの値(FaceSDFのハード参照テクスチャなど)を初期値にする
-			if (FaceMat)
-			{
-				ToonParamUtil::LoadFromMaterial(E->FaceSettings, FaceMat);
 			}
 
 			// 元マテリアルのテクスチャを初期値にする(BaseColorはマスターの値より優先)
@@ -281,59 +293,88 @@ void SToonConverterWidget::BuildEntries()
 		}
 	}
 
+	SyncGlobalFromEntries();
+
 	ListView->RequestListRefresh();
 }
 
 TSharedRef<ITableRow> SToonConverterWidget::OnGenerateRow(TSharedPtr<FToonSlotEntry> Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
+	// スロットに今入っているマテリアルのサムネイル(コンテンツブラウザと同じ見た目)
+	TSharedRef<SWidget> ThumbWidget = SNew(SBox).WidthOverride(64.f).HeightOverride(64.f);
+	if (Mesh.IsValid() && Mesh->GetMaterials().IsValidIndex(Item->Index))
+	{
+		if (UMaterialInterface* SlotMat = Mesh->GetMaterials()[Item->Index].MaterialInterface)
+		{
+			TSharedRef<FAssetThumbnail> Thumb = MakeShared<FAssetThumbnail>(FAssetData(SlotMat), 64, 64, ThumbnailPool);
+			ThumbWidget = SNew(SBox).WidthOverride(64.f).HeightOverride(64.f)
+			[
+				Thumb->MakeThumbnailWidget()
+			];
+		}
+	}
+
 	return SNew(STableRow<TSharedPtr<FToonSlotEntry>>, OwnerTable)
 	[
 		SNew(SHorizontalBox)
 
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4)
 		[
-			SNew(SCheckBox)
-			.IsChecked_Lambda([Item]()
-			{
-				return Item->bFace ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-			})
-			.OnCheckStateChanged_Lambda([this, Item](ECheckBoxState NewState)
-			{
-				SetFace(Item, NewState == ECheckBoxState::Checked);
-			})
+			ThumbWidget
 		]
 
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0)
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(4)
 		[
-			SNew(STextBlock).Text(FText::FromString(TEXT("顔")))
-		]
+			SNew(SVerticalBox)
 
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 4, 4, 4)
-		[
-			SNew(SCheckBox)
-			.IsChecked_Lambda([Item]()
-			{
-				return Item->bOutline ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-			})
-			.OnCheckStateChanged_Lambda([this, Item](ECheckBoxState NewState)
-			{
-				SetOutline(Item, NewState == ECheckBoxState::Checked);
-			})
-		]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text_Lambda([Item]()
+				{
+					return FText::FromString(FString::Printf(TEXT("[%d] %s  (%s)"),
+						Item->Index, *Item->SlotName.ToString(), *Item->MaterialName));
+				})
+			]
 
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0)
-		[
-			SNew(STextBlock).Text(FText::FromString(TEXT("線")))
-		]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+			[
+				SNew(SHorizontalBox)
 
-		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(8, 0)
-		[
-			SNew(STextBlock)
-			.Text_Lambda([Item]()
-			{
-				return FText::FromString(FString::Printf(TEXT("[%d] %s  (%s)"),
-					Item->Index, *Item->SlotName.ToString(), *Item->MaterialName));
-			})
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SCheckBox)
+					.IsChecked_Lambda([Item]()
+					{
+						return Item->bFace ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+					})
+					.OnCheckStateChanged_Lambda([this, Item](ECheckBoxState NewState)
+					{
+						SetFace(Item, NewState == ECheckBoxState::Checked);
+					})
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0, 16, 0)
+				[
+					SNew(STextBlock).Text(FText::FromString(TEXT("顔")))
+				]
+
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SCheckBox)
+					.IsChecked_Lambda([Item]()
+					{
+						return Item->bOutline ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+					})
+					.OnCheckStateChanged_Lambda([this, Item](ECheckBoxState NewState)
+					{
+						SetOutline(Item, NewState == ECheckBoxState::Checked);
+					})
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0)
+				[
+					SNew(STextBlock).Text(FText::FromString(TEXT("線")))
+				]
+			]
 		]
 	];
 }
@@ -396,14 +437,83 @@ void SToonConverterWidget::RebuildOutlinePreviewMID(FToonSlotEntry& Entry)
 	Entry.OutlinePreviewMID = UMaterialInstanceDynamic::Create(Parent, GetTransientPackage());
 	// Static SwitchはMIDでは変えられないため、プレビューはマスターの既定のまま(MI生成時に反映される)
 	ToonParamUtil::ApplyToMID(Entry.OutlineSettings, Entry.OutlinePreviewMID);
-	Entry.OutlinePreviewMID->SetScalarParameterValue(FToonConverter::GetOutlineEnabledParam(), Entry.bOutline ? 1.f : 0.f);
-	Viewport->SetOutlineSlotMaterial(Entry.Index, Entry.OutlinePreviewMID);
+
+	// チェックなしのスロットは M_Empty(何も描画しない)
+	UMaterialInterface* Mat = Entry.OutlinePreviewMID;
+	if (!Entry.bOutline)
+	{
+		if (UMaterialInterface* Empty = FToonConverter::GetEmptyMaterial())
+		{
+			Mat = Empty;
+		}
+	}
+	Viewport->SetOutlineSlotMaterial(Entry.Index, Mat);
+}
+
+void SToonConverterWidget::SyncGlobalFromEntries()
+{
+	if (Entries.Num() == 0 || !GlobalSettings)
+	{
+		return;
+	}
+
+	// 全体設定の表示は先頭スロットの値に合わせる
+	const TSharedPtr<FToonSlotEntry>& First = Entries[0];
+	GlobalSettings->ShadowColor = First->MasterSettings->ShadowColor;
+	GlobalSettings->ShadowOuterColor = First->MasterSettings->ShadowOuterColor;
+	GlobalSettings->OutlineThickness = First->OutlineSettings->OutlineThickness;
+	GlobalDetailsView->ForceRefresh();
+}
+
+void SToonConverterWidget::ApplyGlobalChange(FName PropertyName)
+{
+	const bool bAll = PropertyName.IsNone();
+
+	for (const TSharedPtr<FToonSlotEntry>& E : Entries)
+	{
+		if (!E.IsValid())
+		{
+			continue;
+		}
+
+		if (bAll || PropertyName == GET_MEMBER_NAME_CHECKED(UToonGlobalSettings, ShadowColor))
+		{
+			E->MasterSettings->ShadowColor = GlobalSettings->ShadowColor;
+		}
+		if (bAll || PropertyName == GET_MEMBER_NAME_CHECKED(UToonGlobalSettings, ShadowOuterColor))
+		{
+			E->MasterSettings->ShadowOuterColor = GlobalSettings->ShadowOuterColor;
+		}
+		if (bAll || PropertyName == GET_MEMBER_NAME_CHECKED(UToonGlobalSettings, OutlineThickness))
+		{
+			E->OutlineSettings->OutlineThickness = GlobalSettings->OutlineThickness;
+		}
+
+		if (E->PreviewMID)
+		{
+			ToonParamUtil::ApplyToMID(E->GetActiveSettings(), E->PreviewMID);
+		}
+		if (E->OutlinePreviewMID)
+		{
+			ToonParamUtil::ApplyToMID(E->OutlineSettings, E->OutlinePreviewMID);
+		}
+	}
+
+	// 選択中スロットの表示を更新
+	DetailsView->ForceRefresh();
+	OutlineDetailsView->ForceRefresh();
 }
 
 void SToonConverterWidget::OnObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event)
 {
 	if (!Object)
 	{
+		return;
+	}
+
+	if (Object == GlobalSettings.Get())
+	{
+		ApplyGlobalChange(Event.Property ? Event.Property->GetFName() : NAME_None);
 		return;
 	}
 
@@ -421,7 +531,6 @@ void SToonConverterWidget::OnObjectPropertyChanged(UObject* Object, FPropertyCha
 		if (E->OutlinePreviewMID && E->OutlineSettings == Object)
 		{
 			ToonParamUtil::ApplyToMID(Object, E->OutlinePreviewMID);
-			E->OutlinePreviewMID->SetScalarParameterValue(FToonConverter::GetOutlineEnabledParam(), E->bOutline ? 1.f : 0.f);
 			return;
 		}
 	}
@@ -448,7 +557,7 @@ FReply SToonConverterWidget::OnConvertClicked()
 	FToonConvertResult Result;
 	FToonConverter::Convert(M, Inputs, Result);
 
-	// アウトライン: 1つでもチェックがあれば、全スロット分のMI(無効スロットはOutlineEnabled=0)とBP Actorを作る
+	// アウトライン: 1つでもチェックがあれば、チェックしたスロットのMIを作り(他はM_Empty)、BP Actorも作る
 	bool bAnyOutline = false;
 	TArray<FToonOutlineSlotInput> OutlineInputs;
 	for (const TSharedPtr<FToonSlotEntry>& E : Entries)
@@ -480,7 +589,7 @@ FReply SToonConverterWidget::OnConvertClicked()
 		}
 		RebuildPreviewMID(*E);
 	}
-	ListView->RequestListRefresh();
+	ListView->RebuildList();
 
 	FString Msg = FString::Printf(TEXT("新規作成: %d / 再利用: %d"), Result.Created, Result.Reused);
 	if (!Result.BlueprintPath.IsEmpty())
