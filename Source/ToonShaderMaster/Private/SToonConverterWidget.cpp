@@ -6,6 +6,8 @@
 #include "ToonOutlineBlueprint.h"
 #include "AssetThumbnail.h"
 #include "Styling/AppStyle.h"
+#include "Styling/CoreStyle.h"
+#include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Engine/Blueprint.h"
 #include "Materials/MaterialInstanceConstant.h"
@@ -26,6 +28,33 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 #include "Misc/MessageDialog.h"
+
+namespace
+{
+	// 文字サイズは 大(画面の区切り) / 中(手順の見出し) / 小(説明) の3段階
+	TSharedRef<SWidget> MakeTitle(const TCHAR* Text)
+	{
+		return SNew(STextBlock)
+			.Text(FText::FromString(Text))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16));
+	}
+
+	TSharedRef<SWidget> MakeHeading(const TCHAR* Text)
+	{
+		return SNew(STextBlock)
+			.Text(FText::FromString(Text))
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12));
+	}
+
+	TSharedRef<SWidget> MakeHint(const TCHAR* Text)
+	{
+		return SNew(STextBlock)
+			.Text(FText::FromString(Text))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.AutoWrapText(true);
+	}
+}
 
 void SToonConverterWidget::Construct(const FArguments& InArgs)
 {
@@ -60,22 +89,35 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 	[
 		SNew(SSplitter)
 
-		// 左: 3Dプレビュー + ライト向き
+		// ===== 左: 3Dプレビュー =====
 		+ SSplitter::Slot().Value(0.34f)
 		[
 			SNew(SVerticalBox)
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
+			[
+				MakeTitle(TEXT("プレビュー"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 2, 8, 4)
+			[
+				MakeHint(TEXT("左ドラッグ:回転 / 右ドラッグ:ズーム / 中ドラッグ:パン"))
+			]
 
 			+ SVerticalBox::Slot().FillHeight(1.f)
 			[
 				SAssignNew(Viewport, SToonPreviewViewport)
 			]
 
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
+			[
+				MakeHeading(TEXT("ライトの向き"))
+			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(8)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
 				[
-					SNew(STextBlock).Text(FText::FromString(TEXT("ライト Pitch")))
+					SNew(STextBlock).Text(FText::FromString(TEXT("Pitch(上下)")))
 				]
 				+ SHorizontalBox::Slot().FillWidth(1.f).Padding(0, 0, 12, 0)
 				[
@@ -90,7 +132,7 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
 				[
-					SNew(STextBlock).Text(FText::FromString(TEXT("Yaw")))
+					SNew(STextBlock).Text(FText::FromString(TEXT("Yaw(左右)")))
 				]
 				+ SHorizontalBox::Slot().FillWidth(1.f)
 				[
@@ -106,29 +148,70 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 			]
 		]
 
-		// 中: スロット一覧 + 全体設定 + 実行ボタン
+		// ===== 中: 手順 1〜4 =====
 		+ SSplitter::Slot().Value(0.31f)
 		[
 			SNew(SVerticalBox)
 
-			+ SVerticalBox::Slot().AutoHeight().Padding(8)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 4)
 			[
-				SNew(SObjectPropertyEntryBox)
-				.AllowedClass(USkeletalMesh::StaticClass())
-				.ObjectPath(this, &SToonConverterWidget::GetMeshPath)
-				.OnObjectChanged(this, &SToonConverterWidget::OnMeshChanged)
-				.AllowClear(true)
-				.DisplayUseSelected(true)
-				.DisplayBrowse(true)
+				MakeTitle(TEXT("トゥーン変換"))
 			]
 
+			// 手順1: スケルタルメッシュ(未選択の間はオレンジ色で目立たせる)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0, 8, 8)
+			[
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+				.BorderBackgroundColor_Lambda([this]()
+				{
+					return Mesh.IsValid() ? FLinearColor::White : FLinearColor(1.f, 0.55f, 0.15f, 1.f);
+				})
+				.Padding(10)
+				[
+					SNew(SVerticalBox)
+
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						MakeHeading(TEXT("手順1  スケルタルメッシュを選ぶ(必須)"))
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 6)
+					[
+						MakeHint(TEXT("変換したいキャラのスケルタルメッシュを、下の欄へコンテンツブラウザからドラッグ&ドロップするか、欄をクリックして選びます。"))
+					]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SObjectPropertyEntryBox)
+						.AllowedClass(USkeletalMesh::StaticClass())
+						.ObjectPath(this, &SToonConverterWidget::GetMeshPath)
+						.OnObjectChanged(this, &SToonConverterWidget::OnMeshChanged)
+						.AllowClear(true)
+						.DisplayUseSelected(true)
+						.DisplayBrowse(true)
+						.DisplayThumbnail(true)
+						.ThumbnailPool(ThumbnailPool)
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("まだ選ばれていません。ここを選ぶと、手順2以降が使えるようになります。")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+						.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.7f, 0.3f, 1.f)))
+						.AutoWrapText(true)
+						.Visibility_Lambda([this]() { return Mesh.IsValid() ? EVisibility::Collapsed : EVisibility::Visible; })
+					]
+				]
+			]
+
+			// 手順2: スロット
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0)
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(TEXT("スロット(顔=顔用シェーダー / 線=アウトライン。行を選ぶと右で詳細を調整)")))
-				.AutoWrapText(true)
+				MakeHeading(TEXT("手順2  スロットを設定する"))
 			]
-
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 2, 8, 0)
+			[
+				MakeHint(TEXT("顔のスロットは「顔」、アウトラインを付けたいスロットは「線」にチェックします。行をクリックすると、右で詳細を調整できます。"))
+			]
 			+ SVerticalBox::Slot().FillHeight(0.45f).Padding(8)
 			[
 				SAssignNew(ListView, SListView<TSharedPtr<FToonSlotEntry>>)
@@ -138,10 +221,14 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 				.SelectionMode(ESelectionMode::Single)
 			]
 
-			// 全体設定(タブで MM_ToonShader / M_ToonOutline を切り替え)
+			// 手順3: 全体設定(タブで MM_ToonShader / M_ToonOutline を切り替え)
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0)
 			[
-				SNew(STextBlock).Text(FText::FromString(TEXT("全体設定(変更すると全スロットへ一括反映)")))
+				MakeHeading(TEXT("手順3  全体設定(任意)"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 2, 8, 0)
+			[
+				MakeHint(TEXT("ここを変えると、全スロットへ一括で反映されます。スロットごとの微調整は右の詳細で行います。"))
 			]
 
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 4)
@@ -183,7 +270,16 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 				]
 			]
 
+			// 手順4: 実行
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
+			[
+				MakeHeading(TEXT("手順4  変換して適用する"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 2, 8, 0)
+			[
+				MakeHint(TEXT("メッシュのマテリアルがトゥーン用のMIに置き換わります。「元に戻す」で変換前のマテリアルへ戻せます。"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 4, 8, 0)
 			[
 				SNew(SCheckBox)
 				.IsChecked_Lambda([this]() { return bCreateBlueprint ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
@@ -196,39 +292,62 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 			+ SVerticalBox::Slot().AutoHeight().Padding(8)
 			[
 				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.f).Padding(0, 0, 4, 0)
+				+ SHorizontalBox::Slot().FillWidth(2.f).Padding(0, 0, 4, 0)
 				[
 					SNew(SButton)
+					.ButtonStyle(&FAppStyle::Get().GetWidgetStyle<FButtonStyle>("PrimaryButton"))
 					.HAlign(HAlign_Center)
-					.Text(FText::FromString(TEXT("変換して適用")))
+					.ContentPadding(FMargin(8.f))
+					.IsEnabled_Lambda([this]() { return Mesh.IsValid(); })
 					.OnClicked(this, &SToonConverterWidget::OnConvertClicked)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("変換して適用")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+					]
 				]
 				+ SHorizontalBox::Slot().FillWidth(1.f).Padding(4, 0, 0, 0)
 				[
 					SNew(SButton)
 					.HAlign(HAlign_Center)
-					.Text(FText::FromString(TEXT("元に戻す")))
+					.ContentPadding(FMargin(8.f))
 					.ToolTipText(FText::FromString(TEXT("メッシュのマテリアルを、変換前のマテリアルへ戻します")))
+					.IsEnabled_Lambda([this]() { return Mesh.IsValid(); })
 					.OnClicked(this, &SToonConverterWidget::OnRestoreClicked)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("元に戻す")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+					]
 				]
 			]
 		]
 
-		// 右: 選択スロットの詳細
+		// ===== 右: 選択スロットの詳細 =====
 		+ SSplitter::Slot().Value(0.35f)
 		[
 			SNew(SVerticalBox)
 
-			+ SVerticalBox::Slot().AutoHeight().Padding(8)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
+			[
+				MakeTitle(TEXT("スロットの詳細"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 2, 8, 4)
+			[
+				MakeHint(TEXT("中央の一覧で選んだスロットだけの設定です。"))
+			]
+
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 0, 8, 4)
 			[
 				SNew(STextBlock)
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
 				.Text_Lambda([this]()
 				{
 					if (!SelectedEntry.IsValid())
 					{
-						return FText::FromString(TEXT("詳細(スロットを選択してください)"));
+						return FText::FromString(TEXT("(スロットが選ばれていません)"));
 					}
-					return FText::FromString(FString::Printf(TEXT("詳細: [%d] %s"),
+					return FText::FromString(FString::Printf(TEXT("[%d] %s"),
 						SelectedEntry->Index, *SelectedEntry->SlotName.ToString()));
 				})
 			]
@@ -240,7 +359,11 @@ void SToonConverterWidget::Construct(const FArguments& InArgs)
 
 			+ SVerticalBox::Slot().AutoHeight().Padding(8, 8, 8, 0)
 			[
-				SNew(STextBlock).Text(FText::FromString(TEXT("アウトライン")))
+				MakeHeading(TEXT("アウトライン"))
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8, 2, 8, 4)
+			[
+				MakeHint(TEXT("このスロットの「線」にチェックしたときだけ有効になります。"))
 			]
 
 			+ SVerticalBox::Slot().FillHeight(0.7f).Padding(8, 0, 8, 8)
