@@ -6,6 +6,7 @@
 #include "ToonOutlineBlueprint.h"
 #include "ToonSlotInitializer.h"
 #include "ToonPreviewMaterial.h"
+#include "ToonConvertReport.h"
 #include "AssetThumbnail.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
@@ -832,20 +833,8 @@ FReply SToonConverterWidget::OnConvertClicked()
 	}
 	ListView->RebuildList();
 
-	FString Msg = FString::Printf(TEXT("新規作成: %d / 再利用: %d"), Result.Created, Result.Reused);
-	if (!Result.BlueprintPath.IsEmpty())
-	{
-		Msg += TEXT("\nBP Actorを作成: ") + Result.BlueprintPath;
-	}
-	if (!Result.BlueprintNote.IsEmpty())
-	{
-		Msg += TEXT("\n") + Result.BlueprintNote;
-	}
-	for (const FString& Err : Result.Errors)
-	{
-		Msg += TEXT("\n") + Err;
-	}
-	FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Msg));
+	// 結果はログへ。ダイアログはエラーがあるときだけ
+	ToonConvertReport::Report(Result);
 
 	return FReply::Handled();
 }
