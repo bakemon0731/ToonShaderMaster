@@ -46,10 +46,18 @@ void SToonPreviewViewport::Construct(const FArguments& InArgs)
 
 SToonPreviewViewport::~SToonPreviewViewport()
 {
-	if (PreviewComp && PreviewScene.IsValid())
+	if (PreviewScene.IsValid())
 	{
-		PreviewScene->RemoveComponent(PreviewComp);
-		PreviewComp = nullptr;
+		if (OutlineComp)
+		{
+			PreviewScene->RemoveComponent(OutlineComp);
+			OutlineComp = nullptr;
+		}
+		if (PreviewComp)
+		{
+			PreviewScene->RemoveComponent(PreviewComp);
+			PreviewComp = nullptr;
+		}
 	}
 }
 
@@ -61,6 +69,11 @@ TSharedRef<FEditorViewportClient> SToonPreviewViewport::MakeEditorViewportClient
 
 void SToonPreviewViewport::SetMesh(USkeletalMesh* InMesh)
 {
+	if (OutlineComp)
+	{
+		PreviewScene->RemoveComponent(OutlineComp);
+		OutlineComp = nullptr;
+	}
 	if (PreviewComp)
 	{
 		PreviewScene->RemoveComponent(PreviewComp);
@@ -76,6 +89,15 @@ void SToonPreviewViewport::SetMesh(USkeletalMesh* InMesh)
 	PreviewComp->SetSkeletalMesh(InMesh);
 	PreviewScene->AddComponent(PreviewComp, FTransform::Identity);
 
+	// アウトライン用: 同じメッシュを重ね、親のポーズに追従させる(影なし)
+	OutlineComp = NewObject<USkeletalMeshComponent>(GetTransientPackage());
+	OutlineComp->SetSkeletalMeshAsset(InMesh);
+	OutlineComp->CastShadow = false;
+	OutlineComp->bCastDynamicShadow = false;
+	OutlineComp->BoundsScale = 1.3f;
+	PreviewScene->AddComponent(OutlineComp, FTransform::Identity);
+	OutlineComp->SetLeaderPoseComponent(PreviewComp);
+
 	FrameMesh();
 }
 
@@ -84,6 +106,14 @@ void SToonPreviewViewport::SetSlotMaterial(int32 SlotIndex, UMaterialInterface* 
 	if (PreviewComp)
 	{
 		PreviewComp->SetMaterial(SlotIndex, Material);
+	}
+}
+
+void SToonPreviewViewport::SetOutlineSlotMaterial(int32 SlotIndex, UMaterialInterface* Material)
+{
+	if (OutlineComp)
+	{
+		OutlineComp->SetMaterial(SlotIndex, Material);
 	}
 }
 

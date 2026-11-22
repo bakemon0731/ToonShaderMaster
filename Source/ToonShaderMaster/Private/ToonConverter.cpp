@@ -17,6 +17,7 @@ namespace
 	// プラグイン内に置いたマスターマテリアルのパス
 	const TCHAR* MasterPath = TEXT("/ToonShaderMaster/Materials/MM_ToonShader.MM_ToonShader");
 	const TCHAR* FaceMasterPath = TEXT("/ToonShaderMaster/Materials/M_ToonFaceShader.M_ToonFaceShader");
+	const TCHAR* OutlineMasterPath = TEXT("/ToonShaderMaster/Materials/M_ToonOutline.M_ToonOutline");
 
 	// 両マスター共通のテクスチャパラメータ名
 	const FName BaseColorParam(TEXT("BaseColor"));
@@ -25,6 +26,24 @@ namespace
 UMaterialInterface* FToonConverter::GetMaster(bool bFace)
 {
 	return Cast<UMaterialInterface>(FSoftObjectPath(bFace ? FaceMasterPath : MasterPath).TryLoad());
+}
+
+UMaterialInterface* FToonConverter::GetOutlineMaster()
+{
+	return Cast<UMaterialInterface>(FSoftObjectPath(OutlineMasterPath).TryLoad());
+}
+
+FName FToonConverter::GetOutlineEnabledParam()
+{
+	return FName(TEXT("OutlineEnabled"));
+}
+
+FString FToonConverter::GetOutlineMIPackageName(USkeletalMesh* Mesh, FName SlotName)
+{
+	const FString Dir = FPackageName::GetLongPackagePath(Mesh->GetOutermost()->GetName()) / TEXT("Materials");
+	const FString AssetName = ObjectTools::SanitizeObjectName(
+		FString::Printf(TEXT("MI_%s_%s_Outline"), *Mesh->GetName(), *SlotName.ToString()));
+	return Dir / AssetName;
 }
 
 UTexture* FToonConverter::FindSourceTexture(UMaterialInterface* Orig)
@@ -153,6 +172,86 @@ bool FToonConverter::Convert(USkeletalMesh* Mesh, const TArray<FToonConvertSlotI
 
 	Mesh->PostEditChange();
 	Mesh->MarkPackageDirty();
+
+	return OutResult.Errors.Num() == 0;
+}
+
+bool FToonConverter::ConvertOutline(USkeletalMesh* Mesh, const TArray<FToonOutlineSlotInput>& Slots, FToonConvertResult& OutResult)
+{
+	OutResult.OutlineMaterials.Reset();
+
+	if (!Mesh)
+	{
+		OutResult.Errors.Add(TEXT("スケルタルメッシュが指定されていません。"));
+		return false;
+	}
+
+	UMaterialInterface* OutlineMaster = GetOutlineMaster();
+	if (!OutlineMaster)
+	{
+		OutResult.Errors.Add(FString::Printf(TEXT("アウトライン用マスターが見つかりません: %s"), OutlineMasterPath));
+		return false;
+	}
+
+	IAssetTools& AssetTools = FAssetToolsModule::GetModule().Get();
+	const FString Dir = FPackageName::GetLongPackagePath(Mesh->GetOutermost()->GetName()) / TEXT("Materials");
+
+	const int32 NumSlots = Mesh->GetMaterials().Num();
+	for (int32 i = 0; i < NumSlots; ++i)
+	{
+		const FName SlotName = Mesh->GetMaterials()[i].MaterialSlotName;
+		const FToonOutlineSlotInput Input = Slots.IsValidIndex(i) ? Slots[i] : FToonOutlineSlotInput();
+
+		const FString PackageName = GetOutlineMIPackageName(Mesh, SlotName);
+		const FString AssetName = FPackageName::GetLongPackageAssetName(PackageName);
+
+		UMaterialInstanceConstant* MI = nullptr;
+		bool bReused = false;
+
+		if (FPackageName::DoesPackageExist(PackageName))
+		{
+			MI = LoadObject<UMaterialInstanceConstant>(nullptr, *(PackageName + TEXT(".") + AssetName));
+			if (MI)
+			{
+				MI->Modify();
+				MI->SetParentEditorOnly(OutlineMaster);
+				bReused = true;
+				++OutResult.Reused;
+			}
+		}
+
+		if (!MI)
+		{
+			UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
+			Factory->InitialParent = OutlineMaster;
+			MI = Cast<UMaterialInstanceConstant>(
+				AssetTools.CreateAsset(AssetName, Dir, UMaterialInstanceConstant::StaticClass(), Factory));
+			if (MI)
+			{
+				++OutResult.Created;
+			}
+		}
+
+		if (!MI)
+		{
+			OutResult.Errors.Add(FString::Printf(TEXT("アウトラインMIの作成に失敗: スロット[%d] %s"), i, *SlotName.ToString()));
+			OutResult.OutlineMaterials.Add(nullptr);
+			continue;
+		}
+
+		if (Input.Settings)
+		{
+			ToonParamUtil::ApplyToMI(Input.Settings, MI, bReused);
+		}
+
+		// 有効/無効は常に明示的に書く(無効スロットは描画されない)
+		MI->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(GetOutlineEnabledParam()), Input.bEnabled ? 1.f : 0.f);
+
+		MI->PostEditChange();
+		MI->MarkPackageDirty();
+
+		OutResult.OutlineMaterials.Add(MI);
+	}
 
 	return OutResult.Errors.Num() == 0;
 }

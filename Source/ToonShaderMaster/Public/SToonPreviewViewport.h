@@ -25,6 +25,9 @@ public:
 	/** プレビュー上のスロットのマテリアルだけを差し替える(アセットは変更しない) */
 	void SetSlotMaterial(int32 SlotIndex, UMaterialInterface* Material);
 
+	/** アウトライン用メッシュ(親のポーズに追従)のスロットのマテリアルを差し替える */
+	void SetOutlineSlotMaterial(int32 SlotIndex, UMaterialInterface* Material);
+
 	/** ライト(ディレクショナル)の向き */
 	void SetLightRotation(float Pitch, float Yaw);
 
@@ -38,4 +41,5 @@ private:
 	TSharedPtr<FPreviewScene> PreviewScene;
 	TSharedPtr<FToonPreviewViewportClient> ViewportClient;
 	USkeletalMeshComponent* PreviewComp = nullptr;
+	USkeletalMeshComponent* OutlineComp = nullptr;
 };

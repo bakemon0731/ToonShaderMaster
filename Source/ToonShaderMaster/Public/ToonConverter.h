@@ -11,6 +11,21 @@ struct FToonConvertResult
 	int32 Created = 0;
 	int32 Reused = 0;
 	TArray<FString> Errors;
+
+	/** ConvertOutline が作った/再利用したアウトラインMI(スロット順) */
+	TArray<UMaterialInterface*> OutlineMaterials;
+	/** 作成したBP Actorのパス。作らなかった/既存なら空 */
+	FString BlueprintPath;
+	/** BP生成に関する補足メッセージ(既存のため作り直さない等) */
+	FString BlueprintNote;
+};
+
+/** スロットごとのアウトライン指定 */
+struct FToonOutlineSlotInput
+{
+	bool bEnabled = false;
+	/** UToonOutlineSettings。nullなら値は書かない */
+	UObject* Settings = nullptr;
 };
 
 /** スロットごとの変換指定 */
@@ -29,6 +44,21 @@ public:
 
 	/** 元マテリアルからBaseColor用のテクスチャを探す(WhiteSquareTexture等) */
 	static UTexture* FindSourceTexture(UMaterialInterface* Orig);
+
+	/** アウトライン用マスター(M_ToonOutline)をロードして返す */
+	static UMaterialInterface* GetOutlineMaster();
+
+	/** アウトラインMIの有効/無効を切り替えるスカラーパラメータ名(マスター側に追加が必要) */
+	static FName GetOutlineEnabledParam();
+
+	/** スロットのアウトラインMIのパッケージ名(メッシュと同じフォルダ/Materials) */
+	static FString GetOutlineMIPackageName(USkeletalMesh* Mesh, FName SlotName);
+
+	/**
+	 * 全スロット分のアウトラインMIを作る(無効スロットは OutlineEnabled=0 で描画されない)。
+	 * 結果は OutResult.OutlineMaterials に入る。
+	 */
+	static bool ConvertOutline(USkeletalMesh* Mesh, const TArray<FToonOutlineSlotInput>& Slots, FToonConvertResult& OutResult);
 
 	/**
 	 * Mesh の全スロットをトゥーンMIへ変換して適用する。

@@ -23,7 +23,9 @@ public class ToonShaderMaster : ModuleRules
 			"AssetTools",
 			"AssetRegistry",
 			"PropertyEditor",
-			"ToolMenus"
+			"ToolMenus",
+			"MaterialEditor",
+			"BlueprintGraph"
 		});
 	}
 }

@@ -20,13 +20,18 @@ struct FToonSlotEntry
 	FName SlotName;
 	FString MaterialName;
 	bool bFace = false;
+	/** このスロットにアウトラインを付けるか */
+	bool bOutline = false;
 
 	// 顔/顔以外のどちらに切り替えても値を失わないよう、両方持つ
 	TObjectPtr<UToonMasterSettings> MasterSettings = nullptr;
 	TObjectPtr<UToonFaceSettings> FaceSettings = nullptr;
 
+	TObjectPtr<UToonOutlineSettings> OutlineSettings = nullptr;
+
 	/** 3Dプレビュー用のマテリアル */
 	TObjectPtr<UMaterialInstanceDynamic> PreviewMID = nullptr;
+	TObjectPtr<UMaterialInstanceDynamic> OutlinePreviewMID = nullptr;
 
 	UObject* GetActiveSettings() const
 	{
@@ -56,7 +61,9 @@ private:
 	void OnSlotSelected(TSharedPtr<FToonSlotEntry> Item, ESelectInfo::Type SelectInfo);
 
 	void SetFace(TSharedPtr<FToonSlotEntry> Entry, bool bFace);
+	void SetOutline(TSharedPtr<FToonSlotEntry> Entry, bool bOutline);
 	void RebuildPreviewMID(FToonSlotEntry& Entry);
+	void RebuildOutlinePreviewMID(FToonSlotEntry& Entry);
 	void OnObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& Event);
 
 	FReply OnConvertClicked();
@@ -67,6 +74,8 @@ private:
 
 	TSharedPtr<SListView<TSharedPtr<FToonSlotEntry>>> ListView;
 	TSharedPtr<IDetailsView> DetailsView;
+	TSharedPtr<IDetailsView> OutlineDetailsView;
+	bool bCreateBlueprint = true;
 	TSharedPtr<SToonPreviewViewport> Viewport;
 
 	float LightPitch = -35.f;

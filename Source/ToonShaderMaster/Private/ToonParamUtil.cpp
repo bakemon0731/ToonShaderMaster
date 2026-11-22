@@ -3,9 +3,11 @@
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/UnrealType.h"
+#include "MaterialEditingLibrary.h"
 
 namespace
 {
@@ -13,6 +15,16 @@ namespace
 	{
 		const FStructProperty* S = CastField<FStructProperty>(P);
 		return S && S->Struct == TBaseStructure<FLinearColor>::Get();
+	}
+
+	/** マテリアルのパラメータ名。meta=(ToonParam="...") があればそれ、なければプロパティ名 */
+	FName ParamNameOf(const FProperty* P)
+	{
+		if (P->HasMetaData(TEXT("ToonParam")))
+		{
+			return FName(*P->GetMetaData(TEXT("ToonParam")));
+		}
+		return P->GetFName();
 	}
 }
 
@@ -29,8 +41,9 @@ void ToonParamUtil::ApplyToMID(UObject* Settings, UMaterialInstanceDynamic* MID)
 	for (TFieldIterator<FProperty> It(Settings->GetClass()); It; ++It)
 	{
 		FProperty* P = *It;
-		const FName Name = P->GetFName();
+		const FName Name = ParamNameOf(P);
 
+		// Static Switch(bool)はMIDでは変えられないので、MI生成時にだけ反映する
 		if (const FFloatProperty* F = CastField<FFloatProperty>(P))
 		{
 			MID->SetScalarParameterValue(Name, F->GetPropertyValue_InContainer(Settings));
@@ -66,9 +79,14 @@ void ToonParamUtil::ApplyToMI(UObject* Settings, UMaterialInstanceConstant* MI, 
 			continue;
 		}
 
-		const FMaterialParameterInfo Info(P->GetFName());
+		const FMaterialParameterInfo Info(ParamNameOf(P));
 
-		if (const FFloatProperty* F = CastField<FFloatProperty>(P))
+		if (const FBoolProperty* B = CastField<FBoolProperty>(P))
+		{
+			UMaterialEditingLibrary::SetMaterialInstanceStaticSwitchParameterValue(
+				MI, ParamNameOf(P), B->GetPropertyValue_InContainer(Settings));
+		}
+		else if (const FFloatProperty* F = CastField<FFloatProperty>(P))
 		{
 			MI->SetScalarParameterValueEditorOnly(Info, F->GetPropertyValue_InContainer(Settings));
 		}
@@ -83,7 +101,7 @@ void ToonParamUtil::ApplyToMI(UObject* Settings, UMaterialInstanceConstant* MI, 
 				// 親マスターと同じテクスチャなら書かない(マスター側の差し替えに追従させる)
 				UTexture* ParentTex = nullptr;
 				if (!bWriteAll && MI->Parent
-					&& MI->Parent->GetTextureParameterValue(FHashedMaterialParameterInfo(P->GetFName()), ParentTex)
+					&& MI->Parent->GetTextureParameterValue(FHashedMaterialParameterInfo(ParamNameOf(P)), ParentTex)
 					&& ParentTex == Tex)
 				{
 					continue;
@@ -104,9 +122,19 @@ void ToonParamUtil::LoadFromMaterial(UObject* Settings, UMaterialInterface* Mat)
 	for (TFieldIterator<FProperty> It(Settings->GetClass()); It; ++It)
 	{
 		FProperty* P = *It;
-		const FHashedMaterialParameterInfo Info(P->GetFName());
+		const FHashedMaterialParameterInfo Info(ParamNameOf(P));
 
-		if (const FFloatProperty* F = CastField<FFloatProperty>(P))
+		if (const FBoolProperty* B = CastField<FBoolProperty>(P))
+		{
+			// Static Switchは設定済みのMIからだけ読む(マスター単体ならクラスのデフォルトのまま)
+			if (const UMaterialInstanceConstant* MIns = Cast<UMaterialInstanceConstant>(Mat))
+			{
+				B->SetPropertyValue_InContainer(Settings,
+					UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue(
+						const_cast<UMaterialInstanceConstant*>(MIns), ParamNameOf(P)));
+			}
+		}
+		else if (const FFloatProperty* F = CastField<FFloatProperty>(P))
 		{
 			float V = 0.f;
 			if (Mat->GetScalarParameterValue(Info, V))
